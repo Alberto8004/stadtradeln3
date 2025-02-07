@@ -24,7 +24,7 @@ public class StadtradelnView {
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(800, 600);
 
-        // Tabellenmodell erstellen und Editierbarkeit deaktivieren duch das Überschreiben der Methode isCellEditable
+        // Tabellenmodell erstellen und Editierbarkeit deaktivieren durch das Überschreiben der Methode isCellEditable
         tableModel = new DefaultTableModel(new String[]{"Gruppe", "Kilometer"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -65,11 +65,14 @@ public class StadtradelnView {
     }
 
     public void updateTable(Map<String, Integer> data) {
+        System.out.println("Tabelle wird aktualisiert...");
+        System.out.println("Aktuelle Daten: " + data); // Debug-Ausgabe
         tableModel.setRowCount(0);
         for (Map.Entry<String, Integer> entry : data.entrySet()) {
             tableModel.addRow(new Object[]{entry.getKey(), entry.getValue()});
         }
     }
+
 
     public void addFeedbackMessage(String message) {
         feedbackArea.append(message + "\n");
@@ -77,5 +80,10 @@ public class StadtradelnView {
 
     public void setController(StadtradelnController controller) {
         this.controller = controller;
+    }
+
+    // Neue Methode: Zugriff auf die JTable ermöglichen
+    public JTable getTabelle() {
+        return table;
     }
 }

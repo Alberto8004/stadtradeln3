@@ -1,87 +1,102 @@
 package de.SRH.stadtradeln.model;
 
-import java.time.LocalDate;
+import java.io.*;
 import java.util.*;
 
+/**
+ * Verwaltet die Gruppen, Fahrer und gefahrenen Kilometer.
+ */
 public class StadtradelnModel {
     private Map<String, List<String>> gruppenMitglieder;
     private Map<String, Integer> gruppenKilometer;
-    private Map<String, Integer> fahrerKilometer;
     private Map<String, String[]> gruppenVerantwortliche;
     private final DateiManager dateiManager;
 
-    public StadtradelnModel() {
-        dateiManager = new DateiManager();
+    public StadtradelnModel(DateiManager dateiManager) {
+        this.dateiManager = dateiManager;
+        this.gruppenMitglieder = new HashMap<>();
+        this.gruppenKilometer = new HashMap<>();
+        this.gruppenVerantwortliche = new HashMap<>();
+        ladeDaten();
+    }
+
+    // Lädt die gespeicherten Daten aus der Datei
+    private void ladeDaten() {
         Map<String, Object> daten = dateiManager.ladeDaten();
-        gruppenMitglieder = (Map<String, List<String>>) daten.getOrDefault("gruppenMitglieder", new HashMap<>());
-        gruppenKilometer = (Map<String, Integer>) daten.getOrDefault("gruppenKilometer", new HashMap<>());
-        fahrerKilometer = (Map<String, Integer>) daten.getOrDefault("fahrerKilometer", new HashMap<>());
-        gruppenVerantwortliche = (Map<String, String[]>) daten.getOrDefault("gruppenVerantwortliche", new HashMap<>());
-    }
-
-    public void addGruppe(String gruppe, String verantwortlicherName, String email) {
-        if (gruppenMitglieder.containsKey(gruppe)) {
-            throw new IllegalArgumentException("Gruppe mit dem Namen '" + gruppe + "' existiert bereits.");
-        }
-        gruppenMitglieder.put(gruppe, new ArrayList<>());
-        gruppenKilometer.put(gruppe, 0);
-        gruppenVerantwortliche.put(gruppe, new String[]{verantwortlicherName, email});
-        addFahrer(gruppe, verantwortlicherName);
-    }
-
-    public void addFahrer(String gruppe, String nickname) {
-        if (fahrerKilometer.containsKey(nickname)) {
-            throw new IllegalArgumentException("Fahrer mit dem Nickname '" + nickname + "' existiert bereits.");
-        }
-        if (gruppenMitglieder.containsKey(gruppe)) {
-            gruppenMitglieder.get(gruppe).add(nickname);
-            fahrerKilometer.putIfAbsent(nickname, 0);
+        if (daten != null) {
+            this.gruppenMitglieder = (Map<String, List<String>>) daten.getOrDefault("gruppenMitglieder", new HashMap<>());
+            this.gruppenKilometer = (Map<String, Integer>) daten.getOrDefault("gruppenKilometer", new HashMap<>());
+            this.gruppenVerantwortliche = (Map<String, String[]>) daten.getOrDefault("gruppenVerantwortliche", new HashMap<>());
         }
     }
 
-    public void addFahrt(String nickname, int kilometer) {
-        if (!fahrerKilometer.containsKey(nickname)) {
-            throw new IllegalArgumentException("Fahrer nicht gefunden: " + nickname);
-        }
-        fahrerKilometer.put(nickname, fahrerKilometer.get(nickname) + kilometer);
-
-        for (Map.Entry<String, List<String>> entry : gruppenMitglieder.entrySet()) {
-            if (entry.getValue().contains(nickname)) {
-                String gruppe = entry.getKey();
-                gruppenKilometer.put(gruppe, gruppenKilometer.get(gruppe) + kilometer);
-                break;
-            }
-        }
-
-        dateiManager.speichereFahrt(nickname, kilometer, LocalDate.now());
-    }
-
+    // Speichert die aktuellen Daten in der Datei
     public void speichereDaten() {
         Map<String, Object> daten = new HashMap<>();
         daten.put("gruppenMitglieder", gruppenMitglieder);
         daten.put("gruppenKilometer", gruppenKilometer);
-        daten.put("fahrerKilometer", fahrerKilometer);
         daten.put("gruppenVerantwortliche", gruppenVerantwortliche);
         dateiManager.speichereDaten(daten);
     }
 
-    public Map<String, Integer> getGruppenKilometer() {
-        return gruppenKilometer;
+    // Fügt eine neue Gruppe hinzu
+    public void addGruppe(String gruppenName, String verantwortlicherName, String email) {
+        if (gruppenName == null || gruppenName.isEmpty()) {
+            throw new IllegalArgumentException("Gruppenname darf nicht leer sein.");
+        }
+        if (gruppenVerantwortliche.containsKey(gruppenName)) {
+            throw new IllegalArgumentException("Gruppe existiert bereits.");
+        }
+        gruppenVerantwortliche.put(gruppenName, new String[]{verantwortlicherName, email});
+        gruppenMitglieder.put(gruppenName, new ArrayList<>());
+        gruppenKilometer.put(gruppenName, 0);
     }
 
+    // Fügt einen neuen Fahrer zur Gruppe hinzu
+    public void addFahrer(String gruppe, String nickname) {
+        if (!gruppenMitglieder.containsKey(gruppe)) {
+            throw new IllegalArgumentException("Gruppe existiert nicht.");
+        }
+        if (gruppenMitglieder.get(gruppe).contains(nickname)) {
+            throw new IllegalArgumentException("Fahrer existiert bereits in dieser Gruppe.");
+        }
+        gruppenMitglieder.get(gruppe).add(nickname);
+    }
+
+    // Fügt eine neue Fahrt hinzu
+    public void addFahrt(String nickname, int kilometer) {
+        if (kilometer < 0) {
+            throw new IllegalArgumentException("Kilometeranzahl darf nicht negativ sein.");
+        }
+        for (String gruppe : gruppenMitglieder.keySet()) {
+            if (gruppenMitglieder.get(gruppe).contains(nickname)) {
+                gruppenKilometer.put(gruppe, gruppenKilometer.getOrDefault(gruppe, 0) + kilometer);
+                return;
+            }
+        }
+        throw new IllegalArgumentException("Fahrer nicht gefunden.");
+    }
+
+    // Berechnet die Gesamtkilometer mit Streams
+    public int getGesamtKilometer() {
+        return gruppenKilometer.values().stream().mapToInt(Integer::intValue).sum();
+    }
+
+    // Gibt alle Gruppen mit deren Kilometerzahl zurück (sortiert absteigend)
+    public Map<String, Integer> getGruppenKilometer() {
+        return new TreeMap<>(gruppenKilometer);
+    }
+
+    // Gibt die Gruppenmitglieder zurück
     public Map<String, List<String>> getGruppenMitglieder() {
         return gruppenMitglieder;
     }
 
-    public List<String[]> ladeFahrten() {
-        return dateiManager.ladeFahrten();
-    }
-
-    // Hinzugefügte Methode
-    public String getFahrer(String nickname) {
-        if (fahrerKilometer.containsKey(nickname)) {
-            return nickname;
+    // Debugging-Methode zur Anzeige der aktuellen Daten
+    public void debugGruppenMitglieder() {
+        System.out.println("Aktuelle Gruppen und Mitglieder:");
+        for (Map.Entry<String, List<String>> entry : gruppenMitglieder.entrySet()) {
+            System.out.println(entry.getKey() + ": " + entry.getValue());
         }
-        return null;
     }
 }

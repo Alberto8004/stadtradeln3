@@ -1,109 +1,92 @@
 package de.SRH.stadtradeln.thread;
 
+import de.SRH.stadtradeln.model.DateiManager;
 import de.SRH.stadtradeln.model.StadtradelnModel;
+import de.SRH.stadtradeln.view.StadtradelnView;
 
 import java.io.*;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.nio.file.*;
+import java.util.*;
 
+/**
+ * Ein Thread, der jede Minute prüft, ob eine Datei "neuefahrten.csv" existiert und diese verarbeitet.
+ */
 public class VerarbeitungThread extends Thread {
-
-    private static final Logger logger = Logger.getLogger(VerarbeitungThread.class.getName());
+    private static final Path NEUE_FAHRTEN_DATEI = Paths.get("neuefahrten.csv");
     private final StadtradelnModel model;
-    private final String neueFahrtenPfad = "C:\\Users\\startklar\\IdeaProjects\\Stadtradeln\\src\\de\\SRH\\stadtradeln\\neuefahrten.csv";
+    private final StadtradelnView view;
+    private boolean running = true;
 
-    public VerarbeitungThread(StadtradelnModel model) {
+    public VerarbeitungThread(StadtradelnModel model, DateiManager dateiManager, StadtradelnView view) {
         this.model = model;
+        this.view = view;
     }
 
     @Override
     public void run() {
-        logger.info("VerarbeitungThread gestartet.");
-        while (!Thread.currentThread().isInterrupted()) {
+        while (running) {
             try {
-                verarbeiteNeueFahrten(); // Verarbeitet neue Fahrten aus der Datei
-                Thread.sleep(60000); // Thread pausiert für 60 Sekunden
+                if (Files.exists(NEUE_FAHRTEN_DATEI)) {
+                    verarbeiteNeueFahrten();
+                }
+                Thread.sleep(60000); // 1 Minute warten
             } catch (InterruptedException e) {
-                logger.log(Level.WARNING, "Thread wurde unterbrochen.", e);
-                Thread.currentThread().interrupt();
+                System.err.println("Thread wurde unterbrochen.");
+                running = false;
             }
         }
     }
 
     private void verarbeiteNeueFahrten() {
-        File datei = new File(neueFahrtenPfad);
-        if (!datei.exists()) {
-            logger.info("Keine neue Fahrten-Datei gefunden.");
-            return;
-        }
+        List<String> fehlerhafteZeilen = new ArrayList<>();
+        List<String> gueltigeZeilen = new ArrayList<>();
 
-        try (BufferedReader reader = new BufferedReader(new FileReader(neueFahrtenPfad))) {
-            String zeile;
-            while ((zeile = reader.readLine()) != null) {
+        try (BufferedReader reader = Files.newBufferedReader(NEUE_FAHRTEN_DATEI)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] teile = line.split(",");
+                if (teile.length != 2) {
+                    fehlerhafteZeilen.add(line);
+                    continue;
+                }
+
+                String nickname = teile[0].trim();
+                int kilometer;
+
                 try {
-                    validiereDaten(zeile);
-                    aktualisiereFahrerDaten(zeile);
-                } catch (InvalidDataException e) {
-                    logger.warning("Fehlerhafte Zeile übersprungen: " + e.getMessage());
+                    kilometer = Integer.parseInt(teile[1].trim());
+                    if (kilometer < 0) {
+                        throw new IllegalArgumentException("Kilometeranzahl darf nicht negativ sein.");
+                    }
+                    model.addFahrt(nickname, kilometer);
+                    gueltigeZeilen.add(line);
+                } catch (IllegalArgumentException e) {
+                    fehlerhafteZeilen.add(line);
                 }
             }
-            // Datei nach Verarbeitung löschen
-            if (!datei.delete()) {
-                logger.warning("Die Datei konnte nicht gelöscht werden: " + neueFahrtenPfad);
-            }
         } catch (IOException e) {
-            logger.severe("Fehler beim Lesen der Datei: " + e.getMessage());
+            view.addFeedbackMessage("Fehler beim Lesen der Datei: " + e.getMessage());
         }
-    }
 
-    private void validiereDaten(String zeile) throws InvalidDataException {
-        String[] teile = zeile.split(",");
-        if (teile.length != 3) throw new InvalidDataException("Ungültiges Format: " + zeile);
-
-        String nickname = teile[0];
-        String datum = teile[1];
-        String kilometer = teile[2];
-
-        if (model.getFahrer(nickname) == null) {
-            throw new InvalidDataException("Fahrer nicht gefunden: " + nickname);
-        }
-        if (!datumIstGueltig(datum)) {
-            throw new InvalidDataException("Ungültiges Datum: " + datum);
-        }
-        if (!istNumerisch(kilometer)) {
-            throw new InvalidDataException("Ungültige Kilometerangabe: " + kilometer);
-        }
-    }
-
-    private synchronized void aktualisiereFahrerDaten(String zeile) {
-        String[] teile = zeile.split(",");
-        String nickname = teile[0];
-        int kilometer = Integer.parseInt(teile[2]);
-
-        if (model.getFahrer(nickname) != null) {
-            model.addFahrt(nickname, kilometer);
-            logger.info("Fahrt hinzugefügt: " + zeile);
+        // Falls keine fehlerhaften Daten vorhanden sind, Datei löschen
+        if (fehlerhafteZeilen.isEmpty()) {
+            try {
+                Files.delete(NEUE_FAHRTEN_DATEI);
+                view.addFeedbackMessage("Datei 'neuefahrten.csv' erfolgreich verarbeitet und gelöscht.");
+            } catch (IOException e) {
+                view.addFeedbackMessage("Fehler beim Löschen der Datei: " + e.getMessage());
+            }
         } else {
-            logger.warning("Fahrer nicht gefunden: " + nickname);
+            view.addFeedbackMessage("Fehlerhafte Zeilen in 'neuefahrten.csv' gefunden. Datei bleibt erhalten.");
         }
+
+        // GUI aktualisieren
+        view.updateTable(model.getGruppenKilometer());
+        model.speichereDaten();
     }
 
-    private boolean datumIstGueltig(String datum) {
-        return datum.matches("\\d{4}-\\d{2}-\\d{2}");
-    }
-
-    private boolean istNumerisch(String wert) {
-        try {
-            Integer.parseInt(wert);
-            return true;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
-
-    static class InvalidDataException extends Exception {
-        public InvalidDataException(String message) {
-            super(message);
-        }
+    public void stopThread() {
+        running = false;
+        this.interrupt();
     }
 }
